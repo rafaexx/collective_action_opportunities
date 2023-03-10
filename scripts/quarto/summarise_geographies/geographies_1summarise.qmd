@@ -317,12 +317,12 @@ geo_summary <- geography %>%
     id_geo,
     area_km2 = Area_km2,
     region = region.x,
-    n_sites,
-    n_constru:n_agri_a,
-    b_constru:b_hospital,
+    starts_with("n_"),
+    starts_with("b_"),
     RC1:S2_4
   ) %>%
   mutate(d_sites = n_sites/area_km2, .after = n_sites) %>% # 4) Density of sites
+  relocate(n_sites:d_sites, .after = region) %>%
   rename_with(~get("id_nam"), id_geo)
 }
 ```
