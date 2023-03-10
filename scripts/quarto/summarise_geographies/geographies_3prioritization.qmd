@@ -30,6 +30,8 @@ names(geographies) <- c("hybas4", "hybas5", "hybas6", "hybas7", "wmo", "country"
 
 ```{r}
 generate_prio_index <- function(geo_enriched, top_n_catchments){
+  geo_enriched <- geo_enriched %>%
+    st_drop_geometry()
   
   # Get breaks
     # Population density

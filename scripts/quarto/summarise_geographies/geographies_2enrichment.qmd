@@ -22,6 +22,8 @@ pop <- raster(here("input", "raster_gdp_pop", "ppp_2020_1km_Aggregated.tif"))
 
 ci <- rast(here("input", "raster_GCI30", "GCI30_agg.tif"))
 
+vp <- rast(here("input", "raster_value_crop_prod", "spam2010V2r0_global_V_agg_VP_CROP_A.tif"))
+
 country_adm1 <- st_read(here("input", "geographies", "world_adm1_esri_edited_diss.shp"))
 
 wmo <- st_read(here("input", "geographies", "wmobb_basins.shp"))
@@ -68,7 +70,21 @@ ext_ci <- function(geo){
 }
 ```
 
-# 6) Apply functions to geographies
+# 6) Extract value of production (MapSpam)
+
+```{r}
+ext_vp <- function(geo){
+  
+  vp_geo <- exact_extract(vp, geo, fun = "mean")
+
+  geo %>% 
+    dplyr::select(1) %>%
+    mutate(vp_mean = vp_geo) %>%
+    st_drop_geometry()
+}
+```
+
+# 7) Apply functions to geographies
 
 ```{r}
 enrich_geo <- function(geo_summary){
@@ -77,7 +93,8 @@ enrich_geo <- function(geo_summary){
   
   geo %>%
     left_join(ext_gdp_pop(geo)) %>%
-    left_join(ext_ci(geo)) %>% 
+    left_join(ext_ci(geo)) %>%
+    left_join(ext_vp(geo)) %>%
     mutate(across(where(is.double), ~ round(., 2))) %>%
     st_join(dplyr::select(country_adm1, country = COUNTRY, adm1 = NAME), largest = TRUE) %>%
     st_join(dplyr::select(wmo, wmobb_id = WMOBB, wmo_basin = WMOBBName), largest = TRUE) %>%
@@ -99,12 +116,12 @@ hybas5_enriched %>%
   skim
 ```
 
-# 7) Export files
+# 8) Export files
 
 ```{r}
-# write_rds(st_drop_geometry(hybas7_enriched), here("output", "summarise_geo", "2_enrichment", "final", "hybas7_enriched.rds"))
+# write_rds(hybas7_enriched, here("output", "summarise_geo", "2_enrichment", "final", "hybas7_enriched.rds"))
 # 
-# write_rds(st_drop_geometry(hybas6_enriched), here("output", "summarise_geo", "2_enrichment", "final", "hybas6_enriched.rds"))
+# write_rds(hybas6_enriched, here("output", "summarise_geo", "2_enrichment", "final", "hybas6_enriched.rds"))
 
-write_rds(st_drop_geometry(hybas5_enriched), here("output", "summarise_geo", "2_enrichment", "final", "hybas5_enriched.rds"))
+write_rds(hybas5_enriched, here("output", "summarise_geo", "2_enrichment", "final", "hybas5_enriched.rds"))
 ```
