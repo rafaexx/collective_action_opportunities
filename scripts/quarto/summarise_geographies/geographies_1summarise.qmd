@@ -1,0 +1,343 @@
+---
+title: "Geographies summarise"
+toc: true
+format:
+  html: 
+    code-fold: true
+    theme: simplex
+---
+
+# 0) Load packages and data
+
+**Load packages**
+
+```{r, warning=FALSE, message=FALSE}
+pacman::p_load(tidyverse, here, janitor, sf, skimr, BAMMtools)
+
+sf::sf_use_s2(FALSE) # This is needed because the HydroBASINS data has some geometries issues
+```
+
+**Load data**
+
+```{r, warning=FALSE, message=FALSE, results='hide'}
+assets <- read_rds(here("input", "assets_enriched.rds")) %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326, remove = F)
+
+geographies <- list.files(path = here("input", "geographies"), full.names = T, pattern = ".shp$") %>% 
+  map(st_read)
+
+names(geographies) <- c("hybas4", "hybas5", "hybas6", "hybas7", "wmo", "country", "adm1")
+
+regions <- read_csv(here("input", "world-regions-sdg-united-nations", "world-regions-sdg-united-nations.csv")) %>% 
+  clean_names()
+
+country_region <- geographies$country %>% 
+  left_join(regions, by = c("ISO_3DIGIT" = "code")) %>% 
+  dplyr::select(-c(entity, year)) %>% 
+  rename(region = world_regions_according_to_the_united_nations) %>% 
+  relocate(region, .after = NAME) %>% 
+  mutate(region = case_when(
+    region == "Middle East and North Africa" ~ "Sub-Saharan Africa",
+    NAME == "Abyei (disputed)" ~ "Northern Africa and Western Asia",
+    NAME == "Aksai Chin (disputed)" ~ "Eastern and South-Eastern Asia",
+    NAME == "Arunachal Pradesh (disputed)" ~ "Central and Southern Asia",
+    NAME == "Azores" ~ "Europe and Northern America",
+    NAME == "Bonaire" ~ "Latin America and Caribbean",
+    NAME == "Bouvet Island" ~ "Europe and Northern America",
+    NAME == "British Indian Ocean Territory" ~ "Central and Southern Asia",
+    NAME == "Canarias" ~ "Europe and Northern America",
+    NAME == "Clipperton" ~ "Latin America and Caribbean",
+    NAME == "Cocos Islands" ~ "Oceania",
+    NAME == "French Southern Territories" ~ "Sub-Saharan Africa",
+    NAME == "Guernsey" ~ "Europe and Northern America",
+    NAME == "Jersey" ~ "Europe and Northern America",
+    NAME == "Madeira" ~ "Europe and Northern America",
+    NAME == "Micronesia" ~ "Oceania",
+    NAME == "Saba" ~ "Latin America and Caribbean",
+    NAME == "Saint Barthelemy" ~ "Latin America and Caribbean",
+    NAME == "Saint Eustatius" ~ "Latin America and Caribbean",
+    NAME == "Saint Helena" ~ "Sub-Saharan Africa",
+    NAME == "Saint Pierre and Miquelon" ~ "Europe and Northern America",
+    NAME == "United States Minor Outlying Islands" ~ "Europe and Northern America",
+    NAME == "Vatican City" ~ "Europe and Northern America",
+    NAME == "Western Sahara (disputed)" ~ "Northern Africa and Western Asia",
+    TRUE ~ region
+  ))
+```
+
+# 1) Prepare data 
+
+## 1.1) Exclude sites in the oceans
+
+```{r}
+assets <- assets %>% 
+  drop_na(country) 
+```
+
+## 1.2) Shorten industry names
+
+```{r, warning=FALSE, message=FALSE}
+assets$industry %>% 
+  unique
+```
+
+```{r, warning=FALSE, message=FALSE}
+assets <- assets %>% 
+  mutate(industry = case_when(
+    industry == "Agriculture (animal products)" ~ "agri_a",
+    industry == "Agriculture (plant products)" ~ "agri_p",
+    industry == "Construction Materials" ~ "constru",
+    industry == "Electric Energy Production - Geothermal or Combustion (Biomass, Coal, Gas, Nuclear, Oil)" ~ "geotherm",
+    industry == "Electric Energy Production - Hydropower" ~ "hydrop",
+    industry == "Electric Energy Production - Solar, Wind" ~ "sol_wind",
+    industry == "Fishing and aquaculture" ~ "fishing",
+    industry == "Health Care, Pharmaceuticals and Biotechnology" ~ "pharma",
+    industry == "Hospitality Services" ~ "hospital",
+    industry == "Metals & Mining" ~ "mining",
+    industry == "Oil, Gas & Consumable Fuels" ~ "oil_gas",
+    industry == "Textiles, Apparel & Luxury Good Production" ~ "textile",
+    industry == "Transportation Services" ~ "transpo",
+    industry == "Water utilities / Water Service Providers" ~ "water",
+    industry == "Other" ~ "other"
+  ))
+```
+
+# 2) Summarize data by different geographies
+
+This includes:
+1) Number of sites by industry 
+2) Region-wide natural breaks (Jenks) by industry
+3) Total number of sites 
+4) Density of sites
+5) Average RFS risk scores 
+
+## 2.1) Create a function to summarise data
+
+```{r, warning=FALSE, message=FALSE}
+summarise_geo <- function(geography){
+
+# Prepare geography info
+id_nam <- geography %>% 
+  names %>%
+  magrittr::extract(1)
+
+geography <- geography %>% 
+  rename(id_geo = 1) %>% 
+  rowid_to_column() %>% 
+  mutate(id_geo = factor(id_geo)) %>%
+  st_join(dplyr::select(country_region, region), largest = TRUE)
+
+# Join assets to geography, excluding duplicated assets
+as_geo <- geography %>% 
+  st_join(assets) %>% 
+  st_drop_geometry()
+
+as_geo_no_dup <- as_geo %>% 
+  dplyr::filter(duplicated == "no")
+
+as_geo_dup <- as_geo %>% 
+  dplyr::filter(duplicated == "yes") %>% 
+  distinct(id_geo)
+
+as_geo_uniq <- as_geo_no_dup %>% 
+  bind_rows(as_geo_dup)
+
+# 1) Number of sites by industry
+count_by_ind <- as_geo_uniq %>% 
+  drop_na(id) %>% 
+  group_by(id_geo) %>% 
+  count(industry) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = "industry", names_prefix = "n_", values_from =  "n") %>% 
+  inner_join(dplyr::select(geography, rowid, id_geo, region) %>% st_drop_geometry)
+
+# 2) Region-wide natural breaks (Jenks) by industry
+regions_list <- count_by_ind %>% 
+  drop_na(region) %>% 
+  split(~region)
+
+breaks_by_ind <- map(1:length(regions_list), function(i) {
+  
+  region_i <- regions_list[[i]]
+  
+  # Filter to industries with >=5 assets (because we have 5 breaks)
+  ind_5plus_assets <- region_i %>% 
+    dplyr::select(-c(rowid, id_geo, region)) %>% 
+    summarise(across(everything(), ~sum(!is.na(.)))) %>% 
+    pivot_longer(everything()) %>% 
+    dplyr::filter(value >= 5) %>% 
+    pull(name)
+  
+  # Filter to industries with >=4 different values (this is needed to obtain the breaks)
+  ind_4plus_diff_values <- region_i %>% 
+    dplyr::select(all_of(ind_5plus_assets)) %>% 
+    summarise(across(
+      everything(), ~n_distinct(.))
+    ) %>% 
+    pivot_longer(everything()) %>% 
+    dplyr::filter(value >= 4) %>% 
+    pull(name)
+  
+  # Get breaks
+  breaks <- region_i %>% 
+    dplyr::select(all_of(ind_4plus_diff_values)) %>% 
+    summarise(across(all_of(ind_4plus_diff_values), ~getJenksBreaks(., k = 5))) %>% 
+    rename_with(~str_remove(., "n_"))
+  
+  # Handle industries with no breaks
+  all_ind <- unique(assets$industry)
+  
+  missing_ind <- setdiff(all_ind, str_remove(ind_4plus_diff_values, "n_")) 
+    
+  missing_ind <- as_tibble(matrix(NA, ncol = length(missing_ind), nrow = 1)) %>%
+    set_names(missing_ind)
+  
+  # Complete table of breaks
+  breaks <- breaks %>% 
+    bind_cols(missing_ind)
+  
+  # Assign breaks
+  region_i %>% 
+    mutate(b_constru = 
+             case_when(
+               between(n_constru, breaks$constru[4], breaks$constru[5]) ~ 4,
+               between(n_constru, breaks$constru[3], breaks$constru[4]) ~ 3,
+               between(n_constru, breaks$constru[2], breaks$constru[3]) ~ 2,
+               between(n_constru, breaks$constru[1], breaks$constru[2]) ~ 1),
+           b_hydrop = 
+             case_when(
+               between(n_hydrop, breaks$hydrop[4], breaks$hydrop[5]) ~ 4,
+               between(n_hydrop, breaks$hydrop[3], breaks$hydrop[4]) ~ 3,
+               between(n_hydrop, breaks$hydrop[2], breaks$hydrop[3]) ~ 2,
+               between(n_hydrop, breaks$hydrop[1], breaks$hydrop[2]) ~ 1),
+           b_geotherm = 
+             case_when(
+               between(n_geotherm, breaks$geotherm[4], breaks$geotherm[5]) ~ 4,
+               between(n_geotherm, breaks$geotherm[3], breaks$geotherm[4]) ~ 3,
+               between(n_geotherm, breaks$geotherm[2], breaks$geotherm[3]) ~ 2,
+               between(n_geotherm, breaks$geotherm[1], breaks$geotherm[2]) ~ 1),
+           b_sol_wind = 
+             case_when(
+               between(n_sol_wind, breaks$sol_wind[4], breaks$sol_wind[5]) ~ 4,
+               between(n_sol_wind, breaks$sol_wind[3], breaks$sol_wind[4]) ~ 3,
+               between(n_sol_wind, breaks$sol_wind[2], breaks$sol_wind[3]) ~ 2,
+               between(n_sol_wind, breaks$sol_wind[1], breaks$sol_wind[2]) ~ 1),
+           b_mining = 
+             case_when(
+               between(n_mining, breaks$mining[4], breaks$mining[5]) ~ 4,
+               between(n_mining, breaks$mining[3], breaks$mining[4]) ~ 3,
+               between(n_mining, breaks$mining[2], breaks$mining[3]) ~ 2,
+               between(n_mining, breaks$mining[1], breaks$mining[2]) ~ 1),
+           b_oil_gas = 
+             case_when(
+               between(n_oil_gas, breaks$oil_gas[4], breaks$oil_gas[5]) ~ 4,
+               between(n_oil_gas, breaks$oil_gas[3], breaks$oil_gas[4]) ~ 3,
+               between(n_oil_gas, breaks$oil_gas[2], breaks$oil_gas[3]) ~ 2,
+               between(n_oil_gas, breaks$oil_gas[1], breaks$oil_gas[2]) ~ 1),
+           b_textile = 
+             case_when(
+               between(n_textile, breaks$textile[4], breaks$textile[5]) ~ 4,
+               between(n_textile, breaks$textile[3], breaks$textile[4]) ~ 3,
+               between(n_textile, breaks$textile[2], breaks$textile[3]) ~ 2,
+               between(n_textile, breaks$textile[1], breaks$textile[2]) ~ 1),
+           b_transpo = 
+             case_when(
+               between(n_transpo, breaks$transpo[4], breaks$transpo[5]) ~ 4,
+               between(n_transpo, breaks$transpo[3], breaks$transpo[4]) ~ 3,
+               between(n_transpo, breaks$transpo[2], breaks$transpo[3]) ~ 2,
+               between(n_transpo, breaks$transpo[1], breaks$transpo[2]) ~ 1),
+           b_pharma = 
+             case_when(
+               between(n_pharma, breaks$pharma[4], breaks$pharma[5]) ~ 4,
+               between(n_pharma, breaks$pharma[3], breaks$pharma[4]) ~ 3,
+               between(n_pharma, breaks$pharma[2], breaks$pharma[3]) ~ 2,
+               between(n_pharma, breaks$pharma[1], breaks$pharma[2]) ~ 1),
+           b_other = 
+             case_when(
+               between(n_other, breaks$other[4], breaks$other[5]) ~ 4,
+               between(n_other, breaks$other[3], breaks$other[4]) ~ 3,
+               between(n_other, breaks$other[2], breaks$other[3]) ~ 2,
+               between(n_other, breaks$other[1], breaks$other[2]) ~ 1),
+           b_agri_a = 
+             case_when(
+               between(n_agri_a, breaks$agri_a[4], breaks$agri_a[5]) ~ 4,
+               between(n_agri_a, breaks$agri_a[3], breaks$agri_a[4]) ~ 3,
+               between(n_agri_a, breaks$agri_a[2], breaks$agri_a[3]) ~ 2,
+               between(n_agri_a, breaks$agri_a[1], breaks$agri_a[2]) ~ 1),
+           b_agri_p = 
+             case_when(
+               between(n_agri_p, breaks$agri_p[4], breaks$agri_p[5]) ~ 4,
+               between(n_agri_p, breaks$agri_p[3], breaks$agri_p[4]) ~ 3,
+               between(n_agri_p, breaks$agri_p[2], breaks$agri_p[3]) ~ 2,
+               between(n_agri_p, breaks$agri_p[1], breaks$agri_p[2]) ~ 1),
+           b_fishing = 
+             case_when(
+               between(n_fishing, breaks$fishing[4], breaks$fishing[5]) ~ 4,
+               between(n_fishing, breaks$fishing[3], breaks$fishing[4]) ~ 3,
+               between(n_fishing, breaks$fishing[2], breaks$fishing[3]) ~ 2,
+               between(n_fishing, breaks$fishing[1], breaks$fishing[2]) ~ 1),
+           b_water = 
+             case_when(
+               between(n_water, breaks$water[4], breaks$water[5]) ~ 4,
+               between(n_water, breaks$water[3], breaks$water[4]) ~ 3,
+               between(n_water, breaks$water[2], breaks$water[3]) ~ 2,
+               between(n_water, breaks$water[1], breaks$water[2]) ~ 1),
+           b_hospital = 
+             case_when(
+               between(n_hospital, breaks$hospital[4], breaks$hospital[5]) ~ 4,
+               between(n_hospital, breaks$hospital[3], breaks$hospital[4]) ~ 3,
+               between(n_hospital, breaks$hospital[2], breaks$hospital[3]) ~ 2,
+               between(n_hospital, breaks$hospital[1], breaks$hospital[2]) ~ 1),
+    )
+}) %>% 
+  # Put lists (individual regions) back together
+  bind_rows() %>%
+
+# 3) Total number of sites
+  rowwise() %>%
+  mutate(n_sites = sum(c_across(dplyr::select(count_by_ind, -c(id_geo, region, rowid)) %>% names), na.rm = T)) %>% 
+  ungroup()
+
+# 5) Average RFS risk scores
+mean_rfs <- as_geo_uniq %>% 
+  group_by(id_geo) %>% 
+  summarise(across(RC1:S2_4, list(mean = ~ mean(.x, na.rm = TRUE)), .names = "{.col}")) %>% 
+  ungroup()
+
+# Join pieces together  
+geo_summary <- geography %>% 
+  left_join(breaks_by_ind, by = "id_geo") %>% 
+  left_join(mean_rfs, by = "id_geo") %>%
+  dplyr::select(
+    id_geo,
+    area_km2 = Area_km2,
+    region = region.x,
+    n_sites,
+    n_constru:n_agri_a,
+    b_constru:b_hospital,
+    RC1:S2_4
+  ) %>%
+  mutate(d_sites = n_sites/area_km2, .after = n_sites) %>% # 4) Density of sites
+  rename_with(~get("id_nam"), id_geo)
+}
+```
+
+## 2.2) Apply function to the geographies
+
+```{r, warning=FALSE, message=FALSE}
+# hybas7_summary <- summarise_geo(geographies$hybas7)
+#
+# hybas6_summary <- summarise_geo(geographies$hybas6)
+
+hybas5_summary <- summarise_geo(geographies$hybas5)
+```
+
+# 3) Export files
+
+```{r}
+# write_rds(hybas7_summary, here("output", "summarise_geo", "1_summarise", "hybas7_summary.rds"))
+#
+# write_rds(hybas6_summary, here("output", "summarise_geo", "1_summarise", "hybas6_summary.rds"))
+
+write_rds(hybas5_summary, here("output", "summarise_geo", "1_summarise", "hybas5_summary.rds"))
+```

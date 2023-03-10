@@ -1,0 +1,110 @@
+---
+title: "Geographies enrichment"
+toc: true
+format:
+  html: 
+    code-fold: true
+    theme: simplex
+---
+
+# 0) Load packages and data
+
+```{r}
+pacman::p_load(tidyverse, here, janitor, sf, skimr, exactextractr, raster, terra)
+```
+
+**Load data**
+
+```{r, warning=FALSE, message=FALSE, results='hide'}
+gdp <- raster(here("input", "raster_gdp_pop", "GDP_PPP_2015.tif"))
+
+pop <- raster(here("input", "raster_gdp_pop", "ppp_2020_1km_Aggregated.tif"))
+
+ci <- rast(here("input", "raster_GCI30", "GCI30_agg.tif"))
+
+country_adm1 <- st_read(here("input", "geographies", "world_adm1_esri_edited_diss.shp"))
+
+wmo <- st_read(here("input", "geographies", "wmobb_basins.shp"))
+```
+
+# 1) Extract GDP and population values
+
+```{r}
+ext_gdp_pop <- function(geo){
+  
+  gdp_geo <- exact_extract(gdp, geo, fun = "sum")
+  
+  pop_geo <- exact_extract(pop, geo, fun = "sum")
+
+  geo %>%
+    mutate(
+      gdp_sum = gdp_geo/1000000,
+      gdp_dens = gdp_sum/area_km2,
+      pop_sum = pop_geo,
+      pop_dens = pop_sum/area_km2
+  ) %>%
+    dplyr::select(1, gdp_sum:pop_dens) %>%
+    st_drop_geometry()
+}
+```
+
+# 2) Extract land cover (MODIS) percentage by geography
+**Temporarily remove to speed things up**
+# 3) Extract wetland type (CIFOR) percentage by geography
+**Temporarily remove to speed things up**
+# 4) Extract agri commodity (MapSpam) area sum by Geography
+**Temporarily remove to speed things up**
+# 5) Extract cropping intensity (GCI30)
+
+```{r}
+ext_ci <- function(geo){
+  
+  ci_geo <- exact_extract(ci, geo, fun = "mean")
+
+  geo %>% 
+    dplyr::select(1) %>%
+    mutate(ci_mean = ci_geo) %>%
+    st_drop_geometry()
+}
+```
+
+# 6) Apply functions to geographies
+
+```{r}
+enrich_geo <- function(geo_summary){
+  
+  geo <- read_rds(here("output", "summarise_geo", "1_summarise", geo_summary))
+  
+  geo %>%
+    left_join(ext_gdp_pop(geo)) %>%
+    left_join(ext_ci(geo)) %>% 
+    mutate(across(where(is.double), ~ round(., 2))) %>%
+    st_join(dplyr::select(country_adm1, country = COUNTRY, adm1 = NAME), largest = TRUE) %>%
+    st_join(dplyr::select(wmo, wmobb_id, wmo_basin = WMOBBName), largest = TRUE) %>%
+    relocate(country:wmo_basin, .after = region)
+}
+```
+
+```{r}
+# hybas7_enriched <- enrich_geo("hybas6_summary.rds")
+# 
+# hybas6_enriched <- enrich_geo("hybas6_summary.rds")
+
+hybas5_enriched <- enrich_geo("hybas5_summary.rds")
+```
+
+```{r}
+hybas5_enriched %>% 
+  st_drop_geometry() %>%
+  skim
+```
+
+# 7) Export files
+
+```{r}
+# write_rds(st_drop_geometry(hybas7_enriched), here("output", "summarise_geo", "2_enrichment", "final", "hybas7_enriched.rds"))
+# 
+# write_rds(st_drop_geometry(hybas6_enriched), here("output", "summarise_geo", "2_enrichment", "final", "hybas6_enriched.rds"))
+
+write_rds(st_drop_geometry(hybas5_enriched), here("output", "summarise_geo", "2_enrichment", "final", "hybas5_enriched.rds"))
+```
