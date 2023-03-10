@@ -19,7 +19,7 @@ sf::sf_use_s2(FALSE) # This is needed because the WRF data has some geometries i
 
 ```{r, warning=FALSE, message=FALSE, results='hide'}
 geographies <- list.files(path = here("input/geographies"), full.names = T, pattern = ".shp$") %>% 
-  map(read_sf)
+  map(st_read)
 
 names(geographies) <- c("hybas4", "hybas5", "hybas6", "hybas7", "wmo", "country", "adm1")
 ```
@@ -43,6 +43,9 @@ generate_prio_index <- function(geo_enriched, top_n_catchments){
     # Cropping Intensity
   breaks_ci <- geo_enriched %>% filter(ci_mean > 0)
   breaks_ci <- getJenksBreaks(breaks_ci$ci_mean, k = 6)
+    # Value of Crop Production
+  breaks_vp <- geo_enriched %>% filter(vp_mean > 0)
+  breaks_vp <- getJenksBreaks(breaks_vp$vp_mean, k = 6)
     # Assets density
   breaks_d_sites <- geo_enriched %>% filter(d_sites > quantile(geo_enriched$d_sites, probs = c(0.5), na.rm = TRUE))
   breaks_d_sites <- getJenksBreaks(breaks_d_sites$d_sites, k = 5)
@@ -50,7 +53,7 @@ generate_prio_index <- function(geo_enriched, top_n_catchments){
 data_prioritized <- geo_enriched %>%
   # Prepare data
     # Binary whether industry with high assets density
-  mutate(across(starts_with("b_"), ~ if_else(.x >= 3, 1, 0), .names = "if_{.col}")) %>%
+  mutate(across(starts_with("b_"), ~ if_else(.x == 4, 1, 0), .names = "if_{.col}")) %>%
   mutate(across(starts_with("if_b_"), ~ replace_na(.x, 0))) %>%
     # Binary whether risks layer above medium risk
   mutate(across(c(RC1, RC2, RC3, S2_4, RC8), ~ if_else(.x >= 3.4, 1, 0), .names = "if_{.col}")) %>%
@@ -94,6 +97,15 @@ data_prioritized <- geo_enriched %>%
       between(ci_mean, breaks_ci[2], breaks_ci[3]) ~ 2,
       ci_mean < breaks_ci[2] ~ 1
       ),
+    # Criterion B: Value of Crop Production
+    b_vp = case_when(
+      vp_mean == 0 | is.na(vp_mean) ~ 0,
+      between(vp_mean, breaks_vp[5], breaks_vp[6]) ~ 5,
+      between(vp_mean, breaks_vp[4], breaks_vp[5]) ~ 4,
+      between(vp_mean, breaks_vp[3], breaks_vp[4]) ~ 3,
+      between(vp_mean, breaks_vp[2], breaks_vp[3]) ~ 2,
+      vp_mean < breaks_vp[2] ~ 1
+      ),
     # Criterion C: Assets density
     b_d_sites = case_when(
       d_sites == 0 | is.na(d_sites) ~ 0,
@@ -106,18 +118,24 @@ data_prioritized <- geo_enriched %>%
     # Criterion D: Number of industries with high assets density
     b_n_ind = if_else(n_ind_ifs > 5, 5, n_ind_ifs),
     # Criterion E: Number of risk layers above medium risk
-    b_n_risk = if_else(n_risk_ifs > 5, 5, n_risk_ifs)
+    b_n_risk = case_when(
+      n_risk_ifs >= 4 ~ 5,
+      n_risk_ifs == 3 ~ 4,
+      n_risk_ifs == 2 ~ 3,
+      n_risk_ifs == 1 ~ 2,
+      n_risk_ifs == 0 ~ 1
+    )
   ) %>%
   rowwise() %>%
   
   # Build index
   mutate(
     b_max_a = max(c(b_d_sites, b_n_ind), na.rm = TRUE), # max of assets-related factors
-    b_max_e = max(c(b_ci, b_d_sites, b_n_ind), na.rm = TRUE), # max of economic factors
-    prio_i1 = sum(c(b_pop_d, b_ci, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),  # v1 [A+B+C+D+E]
+    b_max_e = max(c(b_vp, b_d_sites, b_n_ind), na.rm = TRUE), # max of economic factors
+    prio_i1 = sum(c(b_pop_d, b_vp, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),  # v1 [A+B+C+D+E]
     # prio_i2 = sum(c(b_cs, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),         # v2 [B2+C+D+E]
-    prio_i3 = sum(c(b_ci, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),           # v3 [B+C+D+E]
-    prio_i4 = sum(c(b_ci, b_max_a, b_n_risk), na.rm = TRUE),                      # v4 [B+max(C,D)+E]
+    prio_i3 = sum(c(b_vp, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),           # v3 [B+C+D+E]
+    prio_i4 = sum(c(b_vp, b_max_a, b_n_risk), na.rm = TRUE),                      # v4 [B+max(C,D)+E]
     prio_i5 = sum(c(b_max_e, b_n_risk), na.rm = TRUE)                             # v5 [max(B,C,D)+E]
   ) %>%
   ungroup() %>%
@@ -190,6 +208,12 @@ geo_prioritized_regional <- regions_list %>%
 glimpse(geo_prioritized_regional)
 ```
 
+```{r}
+geo_prioritized_regional %>%
+  select(RC1:vp_mean, n_ind_ifs:prio_i5) %>%
+  skim()
+```
+
 ## 2.1) Correlogram of criteria
 
 ```{r}
@@ -228,7 +252,10 @@ corr <- geo_prioritized_regional %>%
     `v3 [B+C+D+E]` = prio_i3,
     `v4 [B+max(C,D)+E]` = prio_i4,
     `v5 [max(B,C,D)+E]` = prio_i5,
-    `B) Crop Intensity` = ci_mean,
+    #`B) Crop Intensity` = ci_mean,
+    `max(B,C,D)` = b_max_e,
+    `max(C,D)` = b_max_a,
+    `B) Value of Production` = vp_mean,
     `C) Assets Density` = d_sites,
     `D) Number of Industries` = n_ind_ifs, 
     `E) Number of Risks` = n_risk_ifs, 
@@ -268,9 +295,9 @@ prio_spat <- geo %>%
 
 ```{r}
 prio_spat %>%
-  filter(top_i4 == "Yes") %>%
+  filter(top_i5 == "Yes") %>%
   mapview(
-    zcol = "prio_i4", 
+    zcol = "prio_i5", 
     col.regions = brewer.pal(3, "Oranges"), 
     lwd = 0.1,
     label = "wmo_basin"
