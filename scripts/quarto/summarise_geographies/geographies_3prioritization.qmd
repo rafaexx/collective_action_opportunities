@@ -146,11 +146,11 @@ data_prioritized %>%
 ### 1.2) Apply function using regional thresholds
 
 ```{r}
-geo_enriched <- read_rds(here("output", "summarise_geo", "2_enrichment", "final", "hybas5_enriched.rds")) %>%
+geo_enriched <- "hybas5_enriched.rds"
 ```
 
 ```{r}
-regions_list <- geo_enriched %>% 
+regions_list <- read_rds(here("output", "summarise_geo", "2_enrichment", "final", geo_enriched)) %>% 
     drop_na(region) %>% 
     split(~region)
 
