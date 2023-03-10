@@ -112,11 +112,11 @@ data_prioritized <- geo_enriched %>%
   mutate(
     b_max_a = max(c(b_d_sites, b_n_ind), na.rm = TRUE), # max of assets-related factors
     b_max_e = max(c(b_ci, b_d_sites, b_n_ind), na.rm = TRUE), # max of economic factors
-    prio_i1 = sum(c(b_pop_d, b_ci, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),
-    # prio_i2 = sum(c(b_cs, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),
-    prio_i3 = sum(c(b_ci, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),
-    prio_i4 = sum(c(b_ci, b_max_a, b_n_risk), na.rm = TRUE),
-    prio_i5 = sum(c(b_max_e, b_n_risk), na.rm = TRUE)
+    prio_i1 = sum(c(b_pop_d, b_ci, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),  # v1 [A+B+C+D+E]
+    # prio_i2 = sum(c(b_cs, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),         # v2 [B2+C+D+E]
+    prio_i3 = sum(c(b_ci, b_d_sites, b_n_ind, b_n_risk), na.rm = TRUE),           # v3 [B+C+D+E]
+    prio_i4 = sum(c(b_ci, b_max_a, b_n_risk), na.rm = TRUE),                      # v4 [B+max(C,D)+E]
+    prio_i5 = sum(c(b_max_e, b_n_risk), na.rm = TRUE)                             # v5 [max(B,C,D)+E]
   ) %>%
   ungroup() %>%
   
@@ -217,6 +217,39 @@ ggcorrplot(corr,
            method = "circle", 
            colors = c("tomato2", "white", "springgreen3"), 
            title = "Correlogram of criteria", 
+           ggtheme = theme_bw)
+```
+
+```{r}
+corr <- geo_prioritized_regional %>%
+  dplyr::select(
+    `v3 [B+C+D+E]` = prio_i3,
+    `v4 [B+max(C,D)+E]` = prio_i4,
+    `v5 [max(B,C,D)+E]` = prio_i5,
+    `B) Crop Intensity` = ci_mean,
+    `C) Assets Density` = d_sites,
+    `D) Number of Industries` = n_ind_ifs, 
+    `E) Number of Risks` = n_risk_ifs, 
+    `E1) Water Scarcity` = RC1,
+    `E2) Flooding` = RC2,
+    `E3) Water Quality` = RC3, 
+    `E4) Ecosystem Condition` = S2_4, 
+    `E5) WASH` = RC8, 
+    `E6) Climate Change` = Phy_P3rc
+  ) %>%
+  cor(method = "spearman", use = "na.or.complete") %>%
+  round(1)
+```
+
+```{r}
+ggcorrplot(corr,
+           hc.order = FALSE, 
+           type = "lower", 
+           lab = TRUE, 
+           lab_size = 3, 
+           method = "circle", 
+           colors = c("tomato2", "white", "springgreen3"), 
+           title = "Correlogram of criteria & indexes", 
            ggtheme = theme_bw)
 ```
 
