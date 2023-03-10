@@ -223,9 +223,7 @@ geographies$hybas7 %>%
     b_n_risk,
     prio_i1:prio_i5,
     prio_i1_rk:prio_i5_rk,
-    top20_i1:top20_i5,
-    # geometry
-    geometry
+    top20_i1:top20_i5
   ) %>%
   st_write(here("output", "summarise_geo", "shp", "hybas5_prioritized_regional.shp"), layer_options = "ENCODING=UTF-8", delete_layer = TRUE)
 ```

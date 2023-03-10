@@ -80,7 +80,7 @@ enrich_geo <- function(geo_summary){
     left_join(ext_ci(geo)) %>% 
     mutate(across(where(is.double), ~ round(., 2))) %>%
     st_join(dplyr::select(country_adm1, country = COUNTRY, adm1 = NAME), largest = TRUE) %>%
-    st_join(dplyr::select(wmo, wmobb_id, wmo_basin = WMOBBName), largest = TRUE) %>%
+    st_join(dplyr::select(wmo, wmobb_id = WMOBB, wmo_basin = WMOBBName), largest = TRUE) %>%
     relocate(country:wmo_basin, .after = region)
 }
 ```
