@@ -10,7 +10,7 @@ format:
 # 0) Load packages and data
 
 ```{r}
-pacman::p_load(tidyverse, here, sf, janitor, skimr, BAMMtools, ggcorrplot, openxlsx)
+pacman::p_load(tidyverse, here, sf, janitor, skimr, BAMMtools, ggcorrplot, mapview, RColorBrewer, openxlsx)
 
 sf::sf_use_s2(FALSE) # This is needed because the WRF data has some geometries issues, inherited from the HydroBASINS data
 ```
@@ -24,7 +24,6 @@ geographies <- list.files(path = here("input/geographies"), full.names = T, patt
 names(geographies) <- c("hybas4", "hybas5", "hybas6", "hybas7", "wmo", "country", "adm1")
 ```
 
-
 # 1) Priority index
 
 ### 1.1) Create function
@@ -32,31 +31,41 @@ names(geographies) <- c("hybas4", "hybas5", "hybas6", "hybas7", "wmo", "country"
 ```{r}
 generate_prio_index <- function(geo_enriched, top_n_catchments){
   
+  # Get breaks
+    # Population density
   breaks_pop_d <- geo_enriched %>% filter(pop_dens > quantile(geo_enriched$pop_dens, probs = c(0.5), na.rm = TRUE))
   breaks_pop_d <- getJenksBreaks(breaks_pop_d$pop_dens, k = 5)
-
+    # Sum of cropland area
   # breaks_cs <- geo_enriched %>% filter(sum_crops_perc > 0)
   # breaks_cs <- getJenksBreaks(breaks_cs$sum_crops_perc, k = 6)
-  
+    # Cropping Intensity
   breaks_ci <- geo_enriched %>% filter(ci_mean > 0)
   breaks_ci <- getJenksBreaks(breaks_ci$ci_mean, k = 6)
-  
+    # Assets density
   breaks_d_sites <- geo_enriched %>% filter(d_sites > quantile(geo_enriched$d_sites, probs = c(0.5), na.rm = TRUE))
   breaks_d_sites <- getJenksBreaks(breaks_d_sites$d_sites, k = 5)
 
 data_prioritized <- geo_enriched %>%
+  # Prepare data
+    # Binary whether industry with high assets density
   mutate(across(starts_with("b_"), ~ if_else(.x >= 3, 1, 0), .names = "if_{.col}")) %>%
   mutate(across(starts_with("if_b_"), ~ replace_na(.x, 0))) %>%
+    # Binary whether risks layer above medium risk
   mutate(across(c(RC1, RC2, RC3, S2_4, RC8), ~ if_else(.x >= 3.4, 1, 0), .names = "if_{.col}")) %>%
   mutate(if_Phy_P3rc = if_else(Phy_P3rc >= 0.3, 1, 0)) %>%
   mutate(across(if_RC1:if_Phy_P3rc, ~ replace_na(.x, 0))) %>%
   rowwise() %>%
   mutate(
-    sum_ind_ifs = sum(c_across(starts_with("if_b_"))),
-    sum_risk_ifs = sum(c_across(if_RC1:if_Phy_P3rc))
+    # Count industries with high assets density  
+    n_ind_ifs = sum(c_across(starts_with("if_b_"))),
+    # Count risk layers above medium risk  
+    n_risk_ifs = sum(c_across(if_RC1:if_Phy_P3rc))
   ) %>%
   ungroup() %>%
+  
+  # Transform data into criteria, ranging from 1 (low opportunity) to 5 (high opportunity)
   mutate(
+    # Criterion A: Population density
     b_pop_d = case_when(
       pop_dens == 0 | is.na(pop_dens) ~ 0,
       between(pop_dens, breaks_pop_d[4], breaks_pop_d[5]) ~ 5,
@@ -65,6 +74,7 @@ data_prioritized <- geo_enriched %>%
       between(pop_dens, breaks_pop_d[1], breaks_pop_d[2]) ~ 2,
       pop_dens < breaks_pop_d[1] ~ 1
       ),
+    # Criterion B2: Sum of cropland area
     # b_cs = case_when(
     #   sum_crops_perc == 0 | is.na(sum_crops_perc) ~ 0,
     #   between(sum_crops_perc, breaks_cs[5], breaks_cs[6]) ~ 5,
@@ -73,6 +83,7 @@ data_prioritized <- geo_enriched %>%
     #   between(sum_crops_perc, breaks_cs[2], breaks_cs[3]) ~ 2,
     #   sum_crops_perc < breaks_cs[2] ~ 1
     #   ),
+    # Criterion B: Cropping Intensity
     b_ci = case_when(
       ci_mean == 0 | is.na(ci_mean) ~ 0,
       between(ci_mean, breaks_ci[5], breaks_ci[6]) ~ 5,
@@ -81,6 +92,7 @@ data_prioritized <- geo_enriched %>%
       between(ci_mean, breaks_ci[2], breaks_ci[3]) ~ 2,
       ci_mean < breaks_ci[2] ~ 1
       ),
+    # Criterion C: Assets density
     b_d_sites = case_when(
       d_sites == 0 | is.na(d_sites) ~ 0,
       between(d_sites, breaks_d_sites[4], breaks_d_sites[5]) ~ 5,
@@ -89,10 +101,14 @@ data_prioritized <- geo_enriched %>%
       between(d_sites, breaks_d_sites[1], breaks_d_sites[2]) ~ 2,
       d_sites < breaks_d_sites[1] ~ 1
       ),
-    b_n_ind = if_else(sum_ind_ifs > 5, 5, sum_ind_ifs),
-    b_n_risk = if_else(sum_risk_ifs > 5, 5, sum_risk_ifs)
+    # Criterion D: Number of industries with high assets density
+    b_n_ind = if_else(n_ind_ifs > 5, 5, n_ind_ifs),
+    # Criterion E: Number of risk layers above medium risk
+    b_n_risk = if_else(n_risk_ifs > 5, 5, n_risk_ifs)
   ) %>%
   rowwise() %>%
+  
+  # Build index
   mutate(
     b_max_a = max(c(b_d_sites, b_n_ind), na.rm = TRUE), # max of assets-related factors
     b_max_e = max(c(b_ci, b_d_sites, b_n_ind), na.rm = TRUE), # max of economic factors
@@ -103,12 +119,17 @@ data_prioritized <- geo_enriched %>%
     prio_i5 = sum(c(b_max_e, b_n_risk), na.rm = TRUE)
   ) %>%
   ungroup() %>%
+  
+  # Rank catchments based on index
   mutate(across(prio_i1:prio_i5, ~ dense_rank(desc(.x)), .names = "{.col}_rk"))
 
+  # Identify catchments of highest opportunity
+    # Arrange data to break ties 
 data_arranged <- data_prioritized %>%
-  arrange(desc(d_sites)) %>%
-  arrange(desc(sum_risk_ifs))
+  arrange(desc(d_sites)) %>% # 2nd Assets density
+  arrange(desc(n_risk_ifs)) # 1st Count risk layers above medium risk
 
+    # Slice top n catchments
 top_i1 <- data_arranged %>%
   slice_max(prio_i1, n = top_n_catchments, with_ties = FALSE) %>%
   mutate(top_i1 = "Yes") %>%
@@ -133,7 +154,8 @@ top_i5 <- data_arranged %>%
   slice_max(prio_i5, n = top_n_catchments, with_ties = FALSE) %>%
   mutate(top_i5 = "Yes") %>%
   dplyr::select(HYBAS_ID, top_i5)
-
+    
+    # Join info of top catchments back to data 
 data_prioritized %>%
   left_join(top_i1, by = "HYBAS_ID") %>%
   # left_join(top_i2, by = "HYBAS_ID") %>%
@@ -147,6 +169,7 @@ data_prioritized %>%
 
 ```{r}
 geo_enriched <- "hybas5_enriched.rds"
+geo <- geographies$hybas5
 ```
 
 ```{r}
@@ -155,15 +178,17 @@ regions_list <- read_rds(here("output", "summarise_geo", "2_enrichment", "final"
     split(~region)
 
 geo_prioritized_regional <- regions_list %>% 
-  map(generate_prio_index, top_n_catchments = 50) %>% 
+  map(generate_prio_index, top_n_catchments = 15) %>% 
   bind_rows()
 ```
+
+# 2) Explore results
 
 ```{r}
 glimpse(geo_prioritized_regional)
 ```
 
-# 2) Correlogram
+## 2.1) Correlogram of criteria
 
 ```{r}
 corr <- geo_prioritized_regional %>%
@@ -171,8 +196,8 @@ corr <- geo_prioritized_regional %>%
                 `B) Crop Intensity` = ci_mean,
                 #`B2) Sum Crops Area` = sum_crops_perc,
                 `C) Assets Density` = d_sites,
-                `D) Number of Industries` = sum_ind_ifs, 
-                `E) Number of Risks` = sum_risk_ifs, 
+                `D) Number of Industries` = n_ind_ifs, 
+                `E) Number of Risks` = n_risk_ifs, 
                 `E1) Water Scarcity` = RC1,
                 `E2) Flooding` = RC2,
                 `E3) Water Quality` = RC3, 
@@ -195,47 +220,29 @@ ggcorrplot(corr,
            ggtheme = theme_bw)
 ```
 
-# 3) Export files
-
-```{r, warning=FALSE, message=FALSE}
-# write_rds(geo_prioritized_regional, here("output", "summarise_geo", "3_prioritization", "hybas5_prioritized_regional.rds"))
-```
+## 2.2) Mapview
 
 **Transform to spatial object**
-
 ```{r}
-#geo_prioritized_regional <- read_rds(here("output", "summarise_geo", "3_prioritization", "hybas5_prioritized_regional.rds"))
-
-geographies$hybas7 %>%
+prio_spat <- geo %>%
   dplyr::select(1) %>%
   mutate(across(1, as.factor)) %>%
   left_join(geo_prioritized_regional) %>%
-  dplyr::select(
-    1:ci_mean,
-    # Prioritization metrics
-    n_ind_ifs = sum_ind_ifs,
-    n_risk_ifs = sum_risk_ifs,
-    b_pop_d,
-    #b_cs,
-    b_ci,
-    b_d_sites = b_d_sites,
-    b_n_ind,
-    b_n_risk,
-    prio_i1:prio_i5,
-    prio_i1_rk:prio_i5_rk,
-    top20_i1:top20_i5
-  ) %>%
-  st_write(here("output", "summarise_geo", "shp", "hybas5_prioritized_regional.shp"), layer_options = "ENCODING=UTF-8", delete_layer = TRUE)
+  dplyr::select(-c(starts_with("if_")))
 ```
-
-**Get list of WMO basins**
 
 ```{r}
-basins_i3 <- geo_prioritized_regional %>%
-  filter(top_i3 == "Yes") %>%
-  group_by(region, wmo_basin) %>%
-  count()
+prio_spat %>%
+  filter(top_i4 == "Yes") %>%
+  mapview(
+    zcol = "prio_i4", 
+    col.regions = brewer.pal(3, "Oranges"), 
+    lwd = 0.1,
+    label = "wmo_basin"
+  )
 ```
+
+## 2.3) Get list of WMO basins
 
 ```{r}
 basins_i4 <- geo_prioritized_regional %>%
@@ -251,10 +258,20 @@ basins_i5 <- geo_prioritized_regional %>%
   count()
 ```
 
+# 3) Export files
+
+**Transform to spatial object**
+```{r}
+write_rds(geo_prioritized_regional, here("output", "summarise_geo", "3_prioritization", "hybas5_prioritized_regional.rds"))
+```
+
+```{r}
+st_write(prio_spat, here("output", "summarise_geo", "shp", "hybas5_prioritized_regional.shp"), layer_options = "ENCODING=UTF-8", delete_layer = TRUE)
+```
+
 ```{r}
 write.xlsx(list(
-  "v3" = basins_i3, 
   "v4" = basins_i4, 
   "v5" = basins_i5),
-  file = here("output", "summarise_geo", "3_prioritization", "hybas5_list_basins_collective_action.xlsx"), rowNames = FALSE)
+  file = here("output", "summarise_geo", "3_prioritization", "hybas5_list_wmo_basins_collective_action.xlsx"), rowNames = FALSE)
 ```
