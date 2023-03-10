@@ -65,7 +65,7 @@ country_region <- geographies$country %>%
   ))
 ```
 
-# 1) Prepare data 
+# 1) Prepare data
 
 ## 1.1) Exclude sites in the oceans
 
@@ -105,11 +105,16 @@ assets <- assets %>%
 # 2) Summarize data by different geographies
 
 This includes:
-1) Number of sites by industry 
-2) Region-wide natural breaks (Jenks) by industry
-3) Total number of sites 
-4) Density of sites
-5) Average RFS risk scores 
+
+1.  Number of sites by industry
+
+2.  Region-wide natural breaks (Jenks) by industry
+
+3.  Total number of sites
+
+4.  Density of sites
+
+5.  Average RFS risk scores
 
 ## 2.1) Create a function to summarise data
 
