@@ -24,6 +24,8 @@ ci <- rast(here("input", "raster_GCI30", "GCI30_agg.tif"))
 
 vp <- rast(here("input", "raster_value_crop_prod", "spam2010V2r0_global_V_agg_VP_CROP_A.tif"))
 
+rfs <- st_read(here("input", "rfs_data", "rfs_data.shp"))
+
 country_adm1 <- st_read(here("input", "geographies", "world_adm1_esri_edited_diss.shp"))
 
 wmo <- st_read(here("input", "geographies", "wmobb_basins.shp"))
@@ -98,7 +100,8 @@ enrich_geo <- function(geo_summary){
     mutate(across(where(is.double), ~ round(., 2))) %>%
     st_join(dplyr::select(country_adm1, country = COUNTRY, adm1 = NAME), largest = TRUE) %>%
     st_join(dplyr::select(wmo, wmobb_id = WMOBB, wmo_basin = WMOBBName), largest = TRUE) %>%
-    relocate(country:wmo_basin, .after = region)
+    relocate(country:wmo_basin, .after = region) %>%
+    st_join(dplyr::select(rfs, RC1, RC2, RC3, S2_4, RC8, Phy_P3rc), largest = TRUE)
 }
 ```
 

@@ -20,7 +20,7 @@ sf::sf_use_s2(FALSE) # This is needed because the HydroBASINS data has some geom
 **Load data**
 
 ```{r, warning=FALSE, message=FALSE, results='hide'}
-assets <- read_rds(here("input", "assets_enriched.rds")) %>%
+assets <- read_rds(here("input", "assets_cleaned.rds")) %>%
   st_as_sf(coords = c("longitude", "latitude"), crs = 4326, remove = F)
 
 geographies <- list.files(path = here("input", "geographies"), full.names = T, pattern = ".shp$") %>% 
@@ -113,8 +113,6 @@ This includes:
 3.  Total number of sites
 
 4.  Density of sites
-
-5.  Average RFS risk scores
 
 ## 2.1) Create a function to summarise data
 
@@ -303,23 +301,15 @@ breaks_by_ind <- map(1:length(regions_list), function(i) {
   mutate(n_sites = sum(c_across(dplyr::select(count_by_ind, -c(id_geo, region, rowid)) %>% names), na.rm = T)) %>% 
   ungroup()
 
-# 5) Average RFS risk scores
-mean_rfs <- as_geo_uniq %>% 
-  group_by(id_geo) %>% 
-  summarise(across(RC1:S2_4, list(mean = ~ mean(.x, na.rm = TRUE)), .names = "{.col}")) %>% 
-  ungroup()
-
 # Join pieces together  
 geo_summary <- geography %>% 
-  left_join(breaks_by_ind, by = "id_geo") %>% 
-  left_join(mean_rfs, by = "id_geo") %>%
+  left_join(breaks_by_ind, by = "id_geo") %>%
   dplyr::select(
     id_geo,
     area_km2 = Area_km2,
     region = region.x,
     starts_with("n_"),
-    starts_with("b_"),
-    RC1:S2_4
+    starts_with("b_")
   ) %>%
   mutate(d_sites = n_sites/area_km2, .after = n_sites) %>% # 4) Density of sites
   relocate(n_sites:d_sites, .after = region) %>%

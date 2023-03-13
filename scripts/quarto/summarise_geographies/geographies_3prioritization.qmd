@@ -210,7 +210,7 @@ glimpse(geo_prioritized_regional)
 
 ```{r}
 geo_prioritized_regional %>%
-  select(RC1:vp_mean, n_ind_ifs:prio_i5) %>%
+  select(gdp_sum:Phy_P3rc, n_ind_ifs:prio_i5) %>%
   skim()
 ```
 
