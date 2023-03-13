@@ -53,12 +53,8 @@ ext_gdp_pop <- function(geo){
 ```
 
 # 2) Extract land cover (MODIS) percentage by geography
-**Temporarily remove to speed things up**
-# 3) Extract wetland type (CIFOR) percentage by geography
-**Temporarily remove to speed things up**
-# 4) Extract agri commodity (MapSpam) area sum by Geography
-**Temporarily remove to speed things up**
-# 5) Extract cropping intensity (GCI30)
+
+**Temporarily remove to speed things up** \# 3) Extract wetland type (CIFOR) percentage by geography **Temporarily remove to speed things up** \# 4) Extract agri commodity (MapSpam) area sum by Geography **Temporarily remove to speed things up** \# 5) Extract cropping intensity (GCI30)
 
 ```{r}
 ext_ci <- function(geo){
@@ -106,7 +102,7 @@ enrich_geo <- function(geo_summary){
 ```
 
 ```{r}
-# hybas7_enriched <- enrich_geo("hybas6_summary.rds")
+# hybas7_enriched <- enrich_geo("hybas7_summary.rds")
 # 
 # hybas6_enriched <- enrich_geo("hybas6_summary.rds")
 
