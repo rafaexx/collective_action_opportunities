@@ -26,41 +26,56 @@ assets <- read_rds(here("input", "assets_cleaned.rds")) %>%
 geographies <- list.files(path = here("input", "geographies"), full.names = T, pattern = ".shp$") %>% 
   map(st_read)
 
-names(geographies) <- c("hybas4", "hybas5", "hybas6", "hybas7", "wmo", "country", "adm1")
+names(geographies) <- c("hybas6", "wmo", "country", "adm1")
 
-regions <- read_csv(here("input", "world-regions-sdg-united-nations", "world-regions-sdg-united-nations.csv")) %>% 
+regions <- read_csv(here("input", "geographies", "world-regions-according-to-the-world-bank.csv")) %>% 
   clean_names()
 
-country_region <- geographies$country %>% 
+country_regions <- geographies$country %>% 
   left_join(regions, by = c("ISO_3DIGIT" = "code")) %>% 
   dplyr::select(-c(entity, year)) %>% 
-  rename(region = world_regions_according_to_the_united_nations) %>% 
-  relocate(region, .after = NAME) %>% 
+  rename(region = world_region_according_to_the_world_bank) %>% 
+  relocate(region, .after = NAME) %>%
   mutate(region = case_when(
-    region == "Middle East and North Africa" ~ "Sub-Saharan Africa",
-    NAME == "Abyei (disputed)" ~ "Northern Africa and Western Asia",
-    NAME == "Aksai Chin (disputed)" ~ "Eastern and South-Eastern Asia",
-    NAME == "Arunachal Pradesh (disputed)" ~ "Central and Southern Asia",
-    NAME == "Azores" ~ "Europe and Northern America",
-    NAME == "Bonaire" ~ "Latin America and Caribbean",
-    NAME == "Bouvet Island" ~ "Europe and Northern America",
-    NAME == "British Indian Ocean Territory" ~ "Central and Southern Asia",
-    NAME == "Canarias" ~ "Europe and Northern America",
-    NAME == "Clipperton" ~ "Latin America and Caribbean",
-    NAME == "Cocos Islands" ~ "Oceania",
-    NAME == "French Southern Territories" ~ "Sub-Saharan Africa",
-    NAME == "Guernsey" ~ "Europe and Northern America",
-    NAME == "Jersey" ~ "Europe and Northern America",
-    NAME == "Madeira" ~ "Europe and Northern America",
-    NAME == "Micronesia" ~ "Oceania",
-    NAME == "Saba" ~ "Latin America and Caribbean",
-    NAME == "Saint Barthelemy" ~ "Latin America and Caribbean",
-    NAME == "Saint Eustatius" ~ "Latin America and Caribbean",
-    NAME == "Saint Helena" ~ "Sub-Saharan Africa",
-    NAME == "Saint Pierre and Miquelon" ~ "Europe and Northern America",
-    NAME == "United States Minor Outlying Islands" ~ "Europe and Northern America",
-    NAME == "Vatican City" ~ "Europe and Northern America",
-    NAME == "Western Sahara (disputed)" ~ "Northern Africa and Western Asia",
+    NAME == "Anguilla" ~ "Europe and Central Asia",
+    NAME == "Saint Barthelemy" ~ "Europe and Central Asia",
+    NAME == "Bonaire" ~ "Europe and Central Asia",
+    NAME == "Saba" ~ "Europe and Central Asia",
+    NAME == "Saint Eustatius" ~ "Europe and Central Asia",
+    #NAME == "Bouvet Island" ~ 
+    NAME == "Cocos Islands" ~ "East Asia and Pacific", 
+    NAME == "Cook Islands" ~ "East Asia and Pacific",                           
+    #NAME == "Clipperton" ~                               
+    NAME == "Christmas Island" ~ "East Asia and Pacific",                          
+    NAME == "Aksai Chin (disputed)" ~ "East Asia and Pacific",                     
+    NAME == "Abyei (disputed)" ~ "Sub-Saharan Africa",                        
+    NAME == "Western Sahara (disputed)" ~ "Middle East and North Africa",                
+    NAME == "Arunachal Pradesh (disputed)" ~ "South Asia",             
+    NAME == "Canarias" ~ "Europe and Central Asia",                                
+    NAME == "Falkland Islands" ~ "Latin America and Caribbean",                          
+    NAME == "Micronesia" ~ "East Asia and Pacific",                               
+    NAME == "French Guiana" ~ "Europe and Central Asia",                           
+    NAME == "Guernsey" ~ "Europe and Central Asia",                                 
+    NAME == "Guadeloupe" ~ "Europe and Central Asia",                               
+    #NAME == "South Georgia and South Sandwich Islands" ~ 
+    #NAME == "Heard Island and McDonald Islands" ~         
+    #NAME == "British Indian Ocean Territory" ~            
+    NAME == "Jersey" ~ "Europe and Central Asia",                                  
+    NAME == "Martinique" ~ "Europe and Central Asia",                               
+    NAME == "Montserrat" ~ "Europe and Central Asia",                                
+    NAME == "Norfolk Island" ~ "East Asia and Pacific",                          
+    NAME == "Saint Pierre and Miquelon" ~ "North America",                
+    NAME == "Pitcairn" ~ "East Asia and Pacific",                                  
+    NAME == "Azores" ~ "Europe and Central Asia",                                 
+    NAME == "Madeira" ~ "Europe and Central Asia",                                  
+    NAME == "Réunion" ~ "Europe and Central Asia",                                  
+    #NAME == "Saint Helena" ~                             
+    #NAME == "French Southern Territories" ~               
+    NAME == "Tokelau" ~ "East Asia and Pacific",                                  
+    NAME == "United States Minor Outlying Islands" ~ "East Asia and Pacific",    
+    NAME == "Vatican City" ~ "Europe and Central Asia",                             
+    NAME == "Wallis and Futuna" ~ "East Asia and Pacific",                        
+    NAME == "Mayotte" ~ "Europe and Central Asia",
     TRUE ~ region
   ))
 ```
@@ -128,7 +143,7 @@ geography <- geography %>%
   rename(id_geo = 1) %>% 
   rowid_to_column() %>% 
   mutate(id_geo = factor(id_geo)) %>%
-  st_join(dplyr::select(country_region, region), largest = TRUE)
+  st_join(dplyr::select(country_regions, region), largest = TRUE)
 
 # Join assets to geography, excluding duplicated assets
 as_geo <- geography %>% 
@@ -320,19 +335,17 @@ geo_summary <- geography %>%
 ## 2.2) Apply function to the geographies
 
 ```{r, warning=FALSE, message=FALSE}
-# hybas7_summary <- summarise_geo(geographies$hybas7)
-#
-# hybas6_summary <- summarise_geo(geographies$hybas6)
+geo_summary <- summarise_geo(geographies$hybas6)
+```
 
-hybas5_summary <- summarise_geo(geographies$hybas5)
+```{r}
+geo_summary %>% 
+  st_drop_geometry() %>%
+  skim
 ```
 
 # 3) Export files
 
 ```{r}
-# write_rds(hybas7_summary, here("output", "summarise_geo", "1_summarise", "hybas7_summary.rds"))
-#
-# write_rds(hybas6_summary, here("output", "summarise_geo", "1_summarise", "hybas6_summary.rds"))
-
-write_rds(hybas5_summary, here("output", "summarise_geo", "1_summarise", "hybas5_summary.rds"))
+write_rds(geo_summary, here("output", "summarise_geo", "1_summarise", "hybas6_summary.rds"))
 ```
