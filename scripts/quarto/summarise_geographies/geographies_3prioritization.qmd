@@ -199,7 +199,8 @@ regions_list <- read_rds(here("output", "summarise_geo", "2_enrichment", "final"
 
 geo_prioritized_regional <- regions_list %>% 
   map(generate_prio_index, top_n_catchments = 15) %>% 
-  bind_rows()
+  bind_rows() %>%
+  mutate(across(prio_i1:prio_i5, ~ dense_rank(desc(.x)), .names = "{.col}_gk"))
 ```
 
 # 2) Explore results
@@ -285,6 +286,7 @@ ggcorrplot(corr,
 ## 2.2) Mapview
 
 **Transform to spatial object**
+
 ```{r}
 prio_spat <- geo %>%
   dplyr::select(1) %>%
@@ -320,9 +322,22 @@ basins_i5 <- geo_prioritized_regional %>%
   count()
 ```
 
+## 2.4) Get list of hybas5 in which hybas7 are within
+
+```{r}
+# hybas5 <- geographies$hybas5 %>%
+#   mutate(HYBAS5_ID = as.factor(HYBAS_ID)) %>%
+#   dplyr::select(HYBAS5_ID)
+# 
+# prio_spat <- prio_spat %>%
+#   st_join(hybas5, largest = TRUE) %>%
+#   relocate(HYBAS5_ID, .before = n_sites)
+```
+
 # 3) Export files
 
 **Transform to spatial object**
+
 ```{r}
 write_rds(geo_prioritized_regional, here("output", "summarise_geo", "3_prioritization", "hybas5_prioritized_regional.rds"))
 ```
@@ -333,7 +348,8 @@ st_write(prio_spat, here("output", "summarise_geo", "shp", "hybas5_prioritized_r
 
 ```{r}
 write.xlsx(list(
-  "v4" = basins_i4, 
-  "v5" = basins_i5),
+  "all" = geo_prioritized_regional,
+  "wmo_v4" = basins_i4, 
+  "wmo_v5" = basins_i5),
   file = here("output", "summarise_geo", "3_prioritization", "hybas5_list_wmo_basins_collective_action.xlsx"), rowNames = FALSE)
 ```
