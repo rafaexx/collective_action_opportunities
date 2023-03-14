@@ -11,116 +11,92 @@ format:
 
 ```{r}
 pacman::p_load(tidyverse, here, janitor, sf, skimr, exactextractr, raster, terra)
+
+sf::sf_use_s2(FALSE) # This is needed because the HydroBASINS data has some geometries issues
 ```
 
 **Load data**
 
 ```{r, warning=FALSE, message=FALSE, results='hide'}
-gdp <- raster(here("input", "raster_gdp_pop", "GDP_PPP_2015.tif"))
+geo_summary <- read_rds(here("output", "summarise_geo", "1_summarise", "hybas6_summary.rds"))
 
-pop <- raster(here("input", "raster_gdp_pop", "ppp_2020_1km_Aggregated.tif"))
+vcp <- rast(here("input", "raster_value_crop_prod", "spam2010V2r0_global_V_agg_VP_CROP_A.tif"))
 
-ci <- rast(here("input", "raster_GCI30", "GCI30_agg.tif"))
+rfs <- brick(here("input", "rfs_data", "rfs_data.tif"))
 
-vp <- rast(here("input", "raster_value_crop_prod", "spam2010V2r0_global_V_agg_VP_CROP_A.tif"))
-
-rfs <- st_read(here("input", "rfs_data", "rfs_data.shp"))
+names(rfs) <- c("RC1", "RC2", "RC3", "S2_4", "RC8", "Phy_P3rc")
 
 country_adm1 <- st_read(here("input", "geographies", "world_adm1_esri_edited_diss.shp"))
 
 wmo <- st_read(here("input", "geographies", "wmobb_basins.shp"))
 ```
 
-# 1) Extract GDP and population values
+# 1) Extract value of production (MapSpam)
 
 ```{r}
-ext_gdp_pop <- function(geo){
+ext_vcp <- function(geo){
   
-  gdp_geo <- exact_extract(gdp, geo, fun = "sum")
-  
-  pop_geo <- exact_extract(pop, geo, fun = "sum")
-
-  geo %>%
-    mutate(
-      gdp_sum = gdp_geo/1000000,
-      gdp_dens = gdp_sum/area_km2,
-      pop_sum = pop_geo,
-      pop_dens = pop_sum/area_km2
-  ) %>%
-    dplyr::select(1, gdp_sum:pop_dens) %>%
-    st_drop_geometry()
-}
-```
-
-# 2) Extract land cover (MODIS) percentage by geography
-
-**Temporarily remove to speed things up** \# 3) Extract wetland type (CIFOR) percentage by geography **Temporarily remove to speed things up** \# 4) Extract agri commodity (MapSpam) area sum by Geography **Temporarily remove to speed things up** \# 5) Extract cropping intensity (GCI30)
-
-```{r}
-ext_ci <- function(geo){
-  
-  ci_geo <- exact_extract(ci, geo, fun = "mean")
+  vcp_geo <- exact_extract(vcp, geo, fun = "mean", append_cols = 1)
 
   geo %>% 
     dplyr::select(1) %>%
-    mutate(ci_mean = ci_geo) %>%
+    left_join(vcp_geo) %>%
+    dplyr::select(1, vcp_mean = mean) %>%
     st_drop_geometry()
 }
 ```
 
-# 6) Extract value of production (MapSpam)
+# 2) Extract Risk Filter scores
 
 ```{r}
-ext_vp <- function(geo){
+ext_rfs <- function(geo){
   
-  vp_geo <- exact_extract(vp, geo, fun = "mean")
+  rfs_geo <- exact_extract(rfs, geo, fun = "mean", append_cols = 1)
 
   geo %>% 
     dplyr::select(1) %>%
-    mutate(vp_mean = vp_geo) %>%
+    left_join(rfs_geo) %>%
+    dplyr::select(
+      1,
+      RC1 = mean.RC1,
+      RC2 = mean.RC2,
+      RC3 = mean.RC3,
+      S2_4 = mean.S2_4,
+      RC8 = mean.RC8,
+      Phy_P3rc = mean.Phy_P3rc
+    ) %>%
     st_drop_geometry()
 }
 ```
 
-# 7) Apply functions to geographies
+# 3) Apply functions to geography
 
 ```{r}
-enrich_geo <- function(geo_summary){
-  
-  geo <- read_rds(here("output", "summarise_geo", "1_summarise", geo_summary))
+enrich_geo <- function(geo){
   
   geo %>%
-    left_join(ext_gdp_pop(geo)) %>%
-    left_join(ext_ci(geo)) %>%
-    left_join(ext_vp(geo)) %>%
+    left_join(ext_vcp(geo)) %>%
+    left_join(ext_rfs(geo)) %>%
     mutate(across(where(is.double), ~ round(., 2))) %>%
+    mutate(d_sites = round(n_sites/area_km2, 6)) %>%
     st_join(dplyr::select(country_adm1, country = COUNTRY, adm1 = NAME), largest = TRUE) %>%
     st_join(dplyr::select(wmo, wmobb_id = WMOBB, wmo_basin = WMOBBName), largest = TRUE) %>%
-    relocate(country:wmo_basin, .after = region) %>%
-    st_join(dplyr::select(rfs, RC1, RC2, RC3, S2_4, RC8, Phy_P3rc), largest = TRUE)
+    relocate(country:wmo_basin, .after = region)
 }
 ```
 
-```{r}
-# hybas7_enriched <- enrich_geo("hybas7_summary.rds")
-# 
-# hybas6_enriched <- enrich_geo("hybas6_summary.rds")
-
-hybas5_enriched <- enrich_geo("hybas5_summary.rds")
+```{r}  
+geo_enriched <- enrich_geo(geo_summary)
 ```
 
 ```{r}
-hybas5_enriched %>% 
+geo_enriched %>% 
   st_drop_geometry() %>%
-  skim
+  skim()
 ```
 
-# 8) Export files
+# 4) Export files
 
 ```{r}
-# write_rds(hybas7_enriched, here("output", "summarise_geo", "2_enrichment", "final", "hybas7_enriched.rds"))
-# 
-# write_rds(hybas6_enriched, here("output", "summarise_geo", "2_enrichment", "final", "hybas6_enriched.rds"))
-
-write_rds(hybas5_enriched, here("output", "summarise_geo", "2_enrichment", "final", "hybas5_enriched.rds"))
+write_rds(geo_enriched, here("output", "summarise_geo", "2_enrichment", "hybas6_enriched.rds"))
 ```

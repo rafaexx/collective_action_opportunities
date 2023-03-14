@@ -332,7 +332,7 @@ geo_summary <- geography %>%
 }
 ```
 
-## 2.2) Apply function to the geographies
+## 2.2) Apply function to the geography
 
 ```{r, warning=FALSE, message=FALSE}
 geo_summary <- summarise_geo(geographies$hybas6)
