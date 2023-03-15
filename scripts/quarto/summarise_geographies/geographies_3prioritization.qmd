@@ -19,6 +19,8 @@ pacman::p_load(tidyverse, here, sf, janitor, skimr, BAMMtools, ggcorrplot, mapvi
 geo_enriched <- read_rds(here("output", "summarise_geo", "2_enrichment", "hybas6_enriched.rds"))
 
 geo <- st_read(here("input", "geographies", "hybas_lev06_v1c.shp"))
+
+wmo <- st_read(here("input", "geographies", "wmobb_basins.shp"))
 ```
 
 # 1) Priority index
@@ -182,20 +184,10 @@ prio_spat <- geo %>%
 
 ```{r}
 prio_spat %>%
-  filter(opp_index %in% c(8:10)) %>%
-  mapview(
-    layer.name = "Global",
-    zcol = "opp_index", 
-    col.regions = brewer.pal(3, "Oranges"), 
-    lwd = 0.1,
-    label = "wmo_basin"
-  ) +
-  prio_spat %>%
   filter(region_top == "Yes") %>%
   mapview(
-    layer.name = "Regional",
-    zcol = "opp_index", 
-    col.regions = brewer.pal(3, "Oranges"), 
+    layer.name = "Top 50 per region",
+    col.regions = "#002673", 
     lwd = 0.1,
     label = "wmo_basin"
   )
@@ -215,7 +207,7 @@ wmo_names <- geo_prioritized %>%
 **Transform to spatial object**
 
 ```{r}
-# write_rds(geo_prioritized, here("output", "summarise_geo", "3_prioritization", "hybas6_prioritized.rds"))
+write_rds(geo_prioritized, here("output", "summarise_geo", "3_prioritization", "hybas6_prioritized.rds"))
 ```
 
 ```{r}
@@ -228,3 +220,17 @@ write.xlsx(list(
   "wmo_names" = wmo_names),
   file = here("output", "summarise_geo", "3_prioritization", "hybas6_list_basins_collective_action.xlsx"), rowNames = FALSE)
 ```
+
+```{r}
+wmobb_ids <- geo_prioritized %>%
+  filter(region_top == "Yes") %>%
+  pull(wmobb_id)
+
+wmo_100_basins <- wmo %>%
+  filter(WMOBB %in% wmobb_ids)
+```
+
+```{r}
+st_write(wmo_100_basins, here("output", "summarise_geo", "shp", "wmo_100_basins.shp"), layer_options = "ENCODING=UTF-8", delete_layer = TRUE)
+```
+
