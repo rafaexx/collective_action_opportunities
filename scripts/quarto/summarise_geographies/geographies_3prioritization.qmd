@@ -10,7 +10,7 @@ format:
 # 0) Load packages and data
 
 ```{r}
-pacman::p_load(tidyverse, here, sf, janitor, skimr, BAMMtools, ggcorrplot, mapview, RColorBrewer, openxlsx)
+pacman::p_load(tidyverse, here, sf, janitor, skimr, BAMMtools, ggcorrplot, mapview, openxlsx)
 ```
 
 **Load data**
@@ -233,4 +233,3 @@ wmo_100_basins <- wmo %>%
 ```{r}
 st_write(wmo_100_basins, here("output", "summarise_geo", "shp", "wmo_100_basins.shp"), layer_options = "ENCODING=UTF-8", delete_layer = TRUE)
 ```
-
