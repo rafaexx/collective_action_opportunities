@@ -1,0 +1,463 @@
+---
+title: "Water ORGs data cleaning"
+toc: true
+format:
+  html: 
+    code-fold: true
+    theme: simplex
+---
+
+# 0) Load packages and data
+
+**Packages**
+
+```{r}
+pacman::p_load(tidyverse, readxl, rio, janitor, here, sf, tidygeocoder, conflicted) 
+
+conflict_prefer("filter", "dplyr")
+
+conflict_prefer("select", "dplyr")
+```
+
+**Data**
+
+```{r}
+dat_ngo <- read_xlsx(here("input/water_orgs/Collective Action Actor Mapping - Dec 2020.xlsx")) %>% 
+  row_to_names(1) %>% 
+  remove_empty(c("rows", "cols")) %>% 
+  rename(capacity = `Capacity (0 = no water staff; 1 = 1-5 staff; 2 = 6-50 staff; 3 = >50 staff)`,
+         `South Korea` = `Korea, Republic of`,
+         Kyrgyzstan = `Kyrgyz Republic`,
+          Laos =  `Lao People's Democratic Republic`,
+         Micronesia = `Micronesia, Federated States of`,
+         Vietnam = `Viet Nam`)
+
+wwf_cap <- read_xlsx(here("input/water_orgs/WWF_capacity.xlsx")) %>% 
+  distinct() %>% 
+  mutate(Country = case_when(
+    Country == "Republic of Korea" ~ "South Korea",
+    Country == "UAE" ~ "United Arab Emirates",
+    Country == "DRC" ~ "Congo DRC",
+    Country == "Guianas" ~ "Guayana",
+    Country == "Russia" ~ "Russian Federation",
+    TRUE ~ Country
+  ))
+
+country <- read_sf(here("input/geographies/world_adm0_esri_edited_diss.shp"))
+
+dbwo <- read_xlsx(here("input", "water_orgs", "District Breakdown of WaterAid Operations.xlsx")) %>% 
+  clean_names() %>% 
+  dplyr::select(-c(wa_federation_members,x2, country_programmes)) %>% 
+  rename_with(~str_remove(.x, "_limited_work"), contains("_limited_work")) %>% 
+  rename(eswatini = e_swatini) 
+```
+
+# 1) Create NGO presence by country
+
+## 1.1) Clean data
+
+```{r}
+dat_ngo2 <- dat_ngo %>% 
+  dplyr::select(Organisations, 
+                capacity, 
+                Afghanistan:Vietnam) %>% 
+  pivot_longer(cols = Afghanistan:Vietnam,
+               names_to = "country",
+               values_to = "ngo_presence") %>% 
+  set_missing("0") %>% 
+  mutate(capacity = as.numeric(capacity) * (as.numeric(ngo_presence)))
+```
+
+## 1.2) Create a dataset with organizations list by country
+
+```{r}
+d <- dat_ngo %>% 
+  dplyr::select(Organisations, 
+                Afghanistan:Vietnam) %>%
+  mutate(Organisations = case_when(
+    Organisations == "2030 Water Resources Group (2030WRG)" ~ "2030WRG",                           
+    Organisations == "Alliance for Global Water Adaptation" ~ "AGWA",                            
+    Organisations == "Alliance for Water Stewardship (AWS)" ~ "AWS",                            
+    Organisations == "Better Cotton Initiative (BCI)" ~ "BCI",                                  
+    Organisations == "Beverage Industry Environment Roundtable (BIER)" ~ "BIER",                 
+    Organisations == "CDP" ~ "CDP",                                                             
+    Organisations == "CEO Water Mandate" ~ "CEOWM",                                               
+    Organisations == "Ceres" ~ "Ceres",                                                           
+    Organisations == "China Water Risk (CWR)" ~ "CWR",                                          
+    Organisations == "Financial Centre for South-South Cooperation" ~ "FCSSC",                    
+    Organisations == "GIZ (NatuRES)" ~ "GIZ",                                                   
+    Organisations == "Global Environment Agency (GEF)" ~ "GEF",                                 
+    Organisations == "Global Environment Management Initaitive (GEMI)" ~ "GEMI",                 
+    Organisations == "Global Water Challenge (GWC)" ~ "GWC",                                    
+    Organisations == "Global Water Partnership (GWP)" ~ "GWP",                                  
+    Organisations == "Good Stuff International" ~ "GSI",                                        
+    Organisations == "Greenpeace" ~ "Greenpeace",                                                      
+    Organisations == "International Council on Mining & Metals (ICMM)" ~ "ICMM",                 
+    Organisations == "International Water Association (IWA)" ~ "IWA",                           
+    Organisations == "International Water Management Institute (IWMI)" ~ "IWMI",                 
+    Organisations == "International Water Resources Association (IWRA)" ~ "IWRA",                
+    Organisations == "IPE" ~ "IPE",                                                             
+    Organisations == "IUCN" ~ "IUCN",                                                            
+    Organisations == "Lien AID" ~ "LienAID",                                                        
+    Organisations == "Natural Resources Defense Council (NRDC)" ~ "NRDC",                        
+    Organisations == "OECD" ~ "OECD",                                                            
+    Organisations == "Pacific Institute" ~ "PI",                                               
+    Organisations == "RVO (Water As Leverage fro Resilient Asian Cities program - WaL)" ~ "RVO",
+    Organisations == "Sustainable Apparel Coalition (SAC)" ~ "SAC",                             
+    Organisations == "Sustainable Rice Platform" ~ "SRP",                                       
+    Organisations == "Swedish Textile Water Initiative (STWI)" ~ "STWI",                         
+    Organisations == "The Nature Conservancy (TNC)" ~ "TNC",                                    
+    Organisations == "Water for People" ~ "WforPeople",                                                
+    Organisations == "Water Foundry" ~ "WFoundry",                                                   
+    Organisations == "Water Witness International (WWI)" ~ "WWI",                               
+    Organisations == "Water.org" ~ "W.org",                                                       
+    Organisations == "WaterAid" ~ "WaterAid",                                                        
+    Organisations == "World Business Council for Sustainable Development (WBCSD)" ~ "WBCSD",      
+    Organisations == "World Resource Institute (WRI)" ~ "WRI",                                  
+    Organisations == "WWF" ~ "WWF" 
+  ))
+```
+
+```{r}
+col_nam <- (d %>% names)[-1]
+
+country_org <- col_nam %>% 
+  map_df(function(country){
+    
+    d2 <- d %>% 
+      dplyr::select(1, country) %>% 
+      drop_na(country)
+    
+    d3 <- tibble(country = country,
+                 organizations = d2$Organisations %>% paste(collapse=", "))
+  })
+```
+
+## 1.3) Create final dataset
+
+```{r}
+ngo_country <- country %>% 
+  stringdist_left_join(
+    dat_ngo2,
+    by = c("NAME" = "country"),
+    method = "lv",
+    max_dist = 1) %>% 
+  st_drop_geometry() %>% 
+  dplyr::select(-c(ISO_2DIGIT, ISO_3DIGIT, country, Area_km2)) %>% 
+  rename(country = NAME) %>% 
+  mutate(ngo_presence = ifelse(
+    is.na(ngo_presence),
+    0,
+    ngo_presence),
+    capacity = as.numeric(capacity),
+    ngo_presence = as.numeric(ngo_presence)) %>% 
+  group_by(country) %>% 
+  summarise(capacity_sum = sum(capacity, na.rm = T),
+            ngo_presence = sum(ngo_presence, na.rm = T),
+            n_org = sum(ngo_presence, na.rm = T)
+  ) %>% 
+  mutate(ngo_presence = ifelse(
+    ngo_presence > 1,
+    "yes",
+    "no"
+  )) %>% 
+  left_join(country_org) %>% 
+  arrange(country) %>% 
+  stringdist_left_join(
+    wwf_cap,
+    by = c("country" = "Country"),
+    method = "lv",
+    max_dist = 1) %>% 
+  dplyr::select(-Country) %>% 
+  dplyr::select(country, ngo_presence, n_org, capacity_sum, organizations, WWF_Staff_FW, WWF_Staff_WS) %>% 
+  mutate(WWF_Staff_FW = ifelse(
+    is.na(WWF_Staff_FW),
+    0,
+    WWF_Staff_FW
+  ),
+  WWF_Staff_WS = ifelse(
+    is.na(WWF_Staff_WS),
+    0,
+    WWF_Staff_WS
+  ))
+```
+
+## 1.4) Export final dataset as csv and rds
+
+```{r}
+rio::export(ngo_country, here("output/water_orgs/water_orgs_country.csv"))
+
+write_rds(ngo_country, here("output/water_orgs/water_orgs_country.rds"))
+```
+
+## 1.5) Create spatial object and export it
+
+```{r}
+# water_orgs_country <- read_rds(here("output/water_orgs/water_orgs_country.rds"))
+# 
+# water_orgs_country_spat <- water_orgs_country %>% 
+#   left_join(country, by = c("country" = "NAME")) %>% 
+#   st_as_sf %>% 
+#   dplyr::select(-c(OBJECTID, 
+#                    ISO_2DIGIT,
+#                    ISO_3DIGIT))
+```
+
+```{r}
+#st_write(water_orgs_country_spat, here("output/water_orgs/shp/water_orgs_country.shp"))
+```
+
+
+# 2) TNC Water Funds
+as downloaded from https://tnc.app.box.com/s/b5wpi99286t1l1vy8fd7dn62lvj1ur0k
+
+```{r}
+tnc_wf <- read_xlsx(here("input", "water_orgs", "Copy of Tracking all WFs_E.Simmons_list_as of 12-07-2021.xlsx"), sheet = "ES tracking list of all WFs") %>%
+  rename("Region" = 1, 
+         "Country" = 2, 
+         "CitySite" = 3, 
+         "WF_Name" = 4, 
+         "Lead" = 5, 
+         "Phase" = 6, 
+         "Date" = 7, 
+         "Status" = 8, 
+         "Launch" = 9, 
+         "Lat" = 10, 
+         "Long" = 11, 
+         "In_Map1" = 12, 
+         "In_Map2" = 13, 
+         "In_Map3" = 14, 
+         "In_Map4" = 15, 
+         "Links" = 16, 
+         "Notes" = 17, 
+         "In_Hub" = 18) #%>%
+# filter(Status %in%  c("WF Under Development / to be Created", "Water Fund Created", "Water Fund created"))
+```
+
+```{r}
+tnc_wf %>%
+  filter(!is.na(Lat) & !is.na(Long)) %>%
+  st_as_sf(coords = c("Long", "Lat"),
+           crs = 4326,
+           remove = F) %>%
+  st_write(here("output", "water_orgs", "shp", "tnc_wf.shp"), layer_options = "ENCODING=UTF-8", delete_layer = TRUE)
+```
+
+
+# 3) AWS sites
+as downloaded from https://a4ws.org/certification/certified-sites/ and https://a4ws.org/certification/registered-sites/
+
+```{r}
+aws_cert <- read_csv(here("input", "water_orgs", "List of AWS certified sites - Alliance for Water Stewardship.csv"))
+
+aws_reg <- read_csv(here("input", "water_orgs", "List of AWS registered sites - Alliance for Water Stewardship.csv"))
+```
+
+```{r}
+aws_cert <- aws_cert %>%
+  rename("Regist_No" = 1, 
+         "Site" = 2, 
+         "Address" = 3, 
+         "Country" = 4, 
+         "Catchment" = 5, 
+         "Cert_Rep" = 6, 
+         "Level" = 7,
+         "Date" = 8,
+         "Valid" = 9,
+         "Standard" = 10,
+         "CAB" = 11,
+         "Industry" = 12,
+         "Status" = 13) %>% 
+  mutate(AWS = "Certified", .before = 1)
+```
+
+```{r}
+aws_reg <- aws_reg %>%
+  rename("Account" = 1, 
+         "Site" = 2, 
+         "Address" = 3, 
+         "Country" = 4, 
+         "Industry" = 5, 
+         "Regist_No" = 6, 
+         "Legacy_No" = 7) %>% 
+  mutate(AWS = "Registered", .before = 1)
+```
+
+```{r}
+aws_sites <- aws_cert %>%
+  bind_rows(aws_reg) %>%
+  geocode(Address, method = "arcgis", lat = "Lat" , long = "Long") %>%
+  mutate(
+    Lat = if_else(Address == "Abu Minqar lat 26.472883 long 27.7680806, Abu Minqar, 0", 26.472883, Lat),
+    Long = if_else(Address == "Abu Minqar lat 26.472883 long 27.7680806, Abu Minqar, 0", 27.7680806, Long)
+  )
+```
+
+```{r}
+aws_sites %>%
+  filter(!is.na(Lat) & !is.na(Long)) %>%
+  st_as_sf(coords = c("Long", "Lat"),
+           crs = 4326,
+           remove = F) %>%
+  st_write(here("output", "water_orgs", "shp", "aws_sites.shp"), layer_options = "ENCODING=UTF-8", delete_layer = TRUE)
+```
+
+# 4) AWS Impact Accelerator
+
+## 4.1) Create table
+
+```{r}
+awsia <- tibble(country = c("Bangladesh", 
+                           "China", 
+                           "China", 
+                           "China", 
+                           "China", 
+                           "China",
+                           "China",
+                           "Chile",
+                           "Chile",
+                           "Chile",
+                           "India",
+                           "India",
+                           "India",
+                           "India",
+                           "India",
+                           "Pakistan",
+                           "Pakistan",
+                           "Peru",
+                           "Peru",
+                           "Spain",
+                           "Spain",
+                           "Turkey",
+                           "Vietnam",
+                           "Vietnam"),
+               city = c("Dhaka", 
+                        "Chengdu", 
+                        "Jinan", 
+                        "Shanghai", 
+                        "Suzhou", 
+                        "Wuxi",
+                        "Wuhan",
+                        "Santiago",
+                        "San Felipe",
+                        "Quilpué",
+                        "Bangalore", 
+                        "Chennai", 
+                        "Coimbatore", 
+                        "Hyderabad", 
+                        "Tiruppur",
+                        "Lahore",
+                        "Karachi",
+                        "Olmos",
+                        "Ica",
+                        "Huelva",
+                        "Murcia",
+                        "Istanbul",
+                        "Hanoi",
+                        "Ho Chi Minh City"
+                        )) 
+```
+
+## 4.2) Search coordinates
+
+```{r}
+awsia2 <- geo(city = awsia$city, country = awsia$country, method = "osm", full_results = TRUE) %>% 
+  select(city, country, lat, long)
+```
+
+## 4.3) Transform table to spatial table
+
+```{r}
+awsia_spat <- awsia2 %>% 
+  drop_na %>% 
+  st_as_sf(crs = 4326,
+           coords = c("long", "lat"),
+           remove = F)
+```
+
+```{r}
+mapview::mapview(awsia_spat)
+```
+
+4.4) Export as a shapefile
+
+```{r}
+write_sf(awsia_spat,here("output", "water_orgs", "awsia.shp"))
+```
+
+# 5) WaterAid
+
+## 5.1) Edit data
+
+```{r}
+dbwo2 <- dbwo %>% 
+  pivot_longer(everything(), names_to = "country", values_to = "geo") %>% 
+  separate(geo, into = c("geo1", "geo2", "geo3"), sep = ",") %>% 
+  pivot_longer(cols = geo1:geo3) %>% 
+  dplyr::select(-name) %>% 
+  drop_na %>% 
+  rename(geo = value) %>%
+  mutate(geo = geo %>% str_squish,
+         country = country %>% str_to_title) %>% 
+  distinct()
+```
+
+## 5.2) Search coordinates
+
+```{r}
+dbwo3 <- geo(city = dbwo2$geo, country = dbwo2$country, method = "osm", full_results = TRUE) %>% 
+  select(city, country, lat, long)
+
+dbwo3_1 <- dbwo3 %>% 
+  drop_na
+
+dbwo3_na_city <- dbwo3 %>% 
+  filter(is.na(lat)) %>% 
+  select(city, country)
+
+dbwo_county <- geo(county = dbwo3_na_city$city, country = dbwo3_na_city$country, method = "osm", full_results = TRUE)
+
+dbwo3_2 <- dbwo_county %>% 
+  drop_na %>% 
+  select(county, country)
+
+dbwo3_na_county <- dbwo_county %>% 
+  filter(is.na(lat)) %>% 
+  select(county, country)
+
+dbwo_state <- geo(state = dbwo3_na_county$county, country = dbwo3_na_county$country, method = "osm", full_results = TRUE)  
+
+dbwo3_3 <- dbwo_state %>% 
+  drop_na %>% 
+  select(state, country)
+
+# I made this file using chatGPT
+places_coord <- read_xlsx(here("input", "water_orgs", "places_coord.xlsx")) %>% 
+  separate("place", c("place", "country"), sep = ",")
+
+wa <- dbwo3_1 %>% 
+  rename(place = city) %>% 
+  bind_rows(dbwo3_2 %>% rename(place = county)) %>% 
+  bind_rows(dbwo3_3 %>% rename(place = state)) %>% 
+  bind_rows(places_coord)
+```
+
+## 5.3) Transform table to spatial table
+
+```{r}
+wa_spat <- wa %>% 
+  drop_na %>% 
+  st_as_sf(crs = 4326,
+           coords = c("long", "lat"),
+           remove = F)
+```
+
+```{r}
+mapview::mapview(wa_spat)
+```
+
+## 5.4) Export as a shapefile
+
+```{r}
+write_sf(wa_spat, here("output", "water_orgs", "water_aid.shp"))
+```
