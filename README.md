@@ -1,6 +1,6 @@
 # Mapping Collective Action Opportunities for Water Stewardship
 
-This repo contains the code to generate a global map (or a shapefile) of collective action opportunities, highlighting 350 catchments, across 100 river basins and 7 regions of the world, where multiple NGOs and the private sector shall work together to accelerate collective action for water stewardship. This mapping exercise is one of the key pieces in the report [Unpacking collective action in water stewardship](https://wwf.panda.org/wwf_news/?11419466/Unpacking-collective-action-in-water-stewardship).
+This repo contains the code to generate a global map (or a shapefile) of collective action opportunities, highlighting 350 catchments, across 100 river basins and 7 regions of the world, where multiple NGOs and the private sector shall work together to accelerate collective action for water stewardship. This mapping exercise is one of the key pieces in the report [Unpacking collective action in water stewardship]([https://wwf.panda.org/wwf_news/?11419466/Unpacking-collective-action-in-water-stewardship](https://wwfint.awsassets.panda.org/downloads/unpacking-collective-action-in-water-stewardship.pdf)).
 
 The input and output data as well as the documentation of this mapping exercise is accessible at [https://doi.org/10.5281/zenodo.7782485](https://doi.org/10.5281/zenodo.7782485)
 
